@@ -1,0 +1,18 @@
+[Unit]
+Description=Wrapper for OGN reciver - Open Glider Network - http://glidernet.org/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/rtlsdr-ogn
+ExecStart=/etc/init.d/rtlsdr-ogn start
+ExecStop=/etc/init.d/rtlsdr-ogn stop
+RestartSec=4
+TimeoutStartSec=160
+#Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+
+

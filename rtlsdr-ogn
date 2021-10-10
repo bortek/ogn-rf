@@ -1,16 +1,16 @@
-!/bin/bash
+#!/bin/bash
 ### BEGIN INIT INFO
 # Provides:          rtlsdr-ogn
-# Required-Start:    $all
-# Required-Stop:
+# Required-Start:    $network $all
+# Required-Stop:     $network $all
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: OGN receiver
 # Description:       OGN reciver - Open Glider Network - http://glidernet.org/
 ### END INIT INFO
 
-# chkconfig: 2345 98 2
-# description: shellbox service for spawning programs
+# Wait for all services on Pi to start
+sleep 60
 
 export PATH=$PATH:/usr/local/bin
 
@@ -25,18 +25,19 @@ logdir=/var/log/$prog
 shells=/var/run/$prog
 chroot=/mnt/ramdisk
 
-# Default gw I Paddress to be able top connect to gpsd server on the android phone
-ip route
-default_gw=$(/sbin/ip route | awk '/default/ { print $3 }')
-
 enable_iplocation="true"
 rtlconffile=$(grep -v "#" $conf | grep rtlsdr-ogn | grep conf | tail -1 | awk '{print $3"/"$NF}')
 iplocation_file=/tmp/iplocation.txt
 gpscoord_file=/tmp/coord.txt
 
 # Default coordinates if iplocation fails
-default_lat=59.691868
-default_long=17.1784745
+# HB
+#default_lat=59.691868
+#default_long=17.1784745
+
+# Barkis
+default_lat=59.418767
+default_long=17.895435
 
 if [ -d $chroot ]
 then
@@ -81,10 +82,13 @@ get_gps_location () {
 # Run loop x number of time
 # timeout command and extract gps coordinate.
 # As soon as we encounter coordinates we break without continuing the left number of loops
-echo "Default gw IP is $default_gw"
-for run in {1..8}; do
-  echo "get_gps_location loop number $run"
+for run in {1..4}; do
+  echo "get_gps_location procedure loop number $run"
+  # Default gw I Paddress to be able top connect to gpsd server on the android phone
+  default_gw=$(/sbin/ip route | awk '/default/ { print $3 }')
+  echo "Default gw=$default_gw"
   timeout 10 gpspipe -w $default_gw:10110 -n 10 | grep -om1 "[[:digit:]]\{1,3\}\.[[:digit:]]\{7\}" |head -2 &> $gpscoord_file
+  # gpspipe: write error, Broken pipe error is OK since we kill it with timeout command
   grep "[0-9]" $gpscoord_file
   if [ $? -eq 0 ]; then echo "Got GPS coordinates OK"; break; fi
 done
@@ -100,7 +104,7 @@ done
 
 
 checkpid () {
-  [ -d /proc/$PID ]
+  [ -d /proc/$PID ] 
 }
 
 launch () {
@@ -143,7 +147,22 @@ launch () {
 
     # Wait for time to be sync before launching
     #while true; do /usr/sbin/ntp-wait -v;  if [ $? -eq 0 ]; then break; fi; sleep 2; done
-    while true; do service ntp stop; sleep 1; service ntp start; /usr/sbin/ntp-wait -v -n 5;  if [ $? -eq 0 ]; then break; fi; sleep 2; done
+    while true; do
+	    echo "calling to stop NTPD"
+	    service ntp stop
+	    sleep 1
+	    echo "Calling to start ntpd"
+	    service ntp start
+	    sleep 5
+	    echo "Calling ntp-wait"
+	    /usr/sbin/ntp-wait -v -n 5
+	    	if /usr/sbin/ntp-wait -v -n 5; then
+			# break out of while loop
+			echo "NTP seems got synced. Breaking out of loop"
+			break
+		fi
+		sleep 2
+    done
 
     # start shellbox as other user
     echo -n Starting: $PORT $USER $DIR $COMMAND
@@ -152,7 +171,7 @@ launch () {
     pidfile=/tmp/procServ-$PORT.pid
     rm -f $pidfile
 #    $exe -p $pidfile $options $DIR $params $PORT $COMMAND >> $LOG 2>&1 < /dev/null
-    $CHROOT su $USER -c "$exe -p $pidfile $options $DIR $params $PORT $COMMAND >> $LOG 2>&1 < /dev/null"
+    $CHROOT su $USER -c "$exe --logfile $LOG -p $pidfile $options $DIR $params $PORT $COMMAND >> $LOG 2>&1 < /dev/null"
     # check if starting worked or failed
     sleep 1
     if [ -e $pidfile ]
@@ -171,6 +190,7 @@ launch () {
 }
 
 start () {
+	ip a
   [ -r $conf ] || fail "$conf not readable"
   [ -x $exe ] || fail "$exe is not executable"
   if ! check_internet ; then sleep 60 ; fi
@@ -183,7 +203,9 @@ start () {
   touch /var/lock/$prog
 }
 
-stopshell() {
+
+stopshell () {
+  echo "Executing stopshell routine"
   PID=$1
   PORT=$2
   shift
@@ -268,14 +290,14 @@ status () {
 
     # check if we have to report all shells
     [ "$*" ] &&  echo "$*" | grep -qvE "(^|[[:space:]])$PORT([[:space:]]|$)" && continue
-
+    
     if [ "$logdir" -a "$log" ]
     then
       echo "-------------------------------------------------------------------"
     fi
-
+    
     if LINE=$(grep "$PORT $USER $DIR $CMD" $shells 2> /dev/null)
-    then
+    then 
       PID=${LINE%% *}
       if checkpid $PID
       then
@@ -287,11 +309,11 @@ status () {
       fi
     else
       $SETCOLOR_FAILURE
-      echo -n STOPPED
+      echo -n STOPPED 
       $SETCOLOR_NORMAL
     fi
     echo -e "\t$PORT\t$USER\t$DIR\t$CMD"
-
+    
     if [ "$logdir" -a "$log" ]
     then
         grep '\*\*\*\*' $logdir/$PORT 2>/dev/null
@@ -309,3 +331,4 @@ case "$CMD" in
   (status)        status $*;;
   (*)             echo "Usage: $0 {start [ports]|stop [ports]|restart [ports]|reload|status [-log] [ports]}" ;;
 esac
+
